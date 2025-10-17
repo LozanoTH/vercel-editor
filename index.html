@@ -1,0 +1,1287 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Galaxy 3D — Control Total HD</title>
+  <style>
+    html,body{height:100%;margin:0;background:#000;overflow:hidden;color:#ddd;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial}
+    
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 0;
+      animation: bgPulse 20s ease-in-out infinite;
+    }
+
+    @keyframes bgPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.95; }
+    }
+
+    body::after {
+      content: '';
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 0;
+      animation: bgShift 40s linear infinite;
+      mix-blend-mode: screen;
+    }
+
+    @keyframes bgShift {
+      0% { transform: translate(0, 0); }
+      50% { transform: translate(20px, 30px); }
+      100% { transform: translate(0, 0); }
+    }
+
+    .star-field {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 1;
+      overflow: hidden;
+    }
+
+    .star {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      background: #fff;
+      border-radius: 50%;
+      animation: twinkle 3s infinite;
+    }
+
+    @keyframes twinkle {
+      0%, 100% { opacity: 0.3; }
+      50% { opacity: 1; }
+    }
+
+    .dust {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 2;
+      mix-blend-mode: overlay;
+    }
+
+    canvas{display:block;position:relative;z-index:50}
+
+    /* Panel Control - Responsive */
+    #controlPanel {
+      position: fixed;
+      right: 0; top: 0;
+      width: 380px;
+      height: 100%;
+      background: rgba(0,0,0,0.9);
+      backdrop-filter: blur(12px);
+      border-left: 2px solid #ff6b9d;
+      overflow-y: auto;
+      z-index: 200;
+      padding: 16px;
+      box-sizing: border-box;
+      font-size: 12px;
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: -4px 0 20px rgba(0,0,0,0.5);
+    }
+
+    #controlPanel.hidden {
+      transform: translateX(100%);
+      box-shadow: none;
+    }
+
+    #controlPanel.floating {
+      position: fixed;
+      width: 360px;
+      height: auto;
+      max-height: 85vh;
+      right: 12px;
+      top: 50px;
+      border-radius: 12px;
+      border: 2px solid #ff6b9d;
+      box-shadow: 0 8px 32px rgba(255,107,157,0.3);
+    }
+
+    .toggle-panel {
+      position: fixed;
+      z-index: 201;
+      background: rgba(255,107,157,0.3);
+      border: 1px solid #ff6b9d;
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 11px;
+      transition: all 0.2s;
+      backdrop-filter: blur(6px);
+    }
+
+    .toggle-panel:hover {
+      background: rgba(255,107,157,0.6);
+    }
+
+    #togglePanel {
+      right: 12px;
+      top: 12px;
+    }
+
+    #dockPanel {
+      right: 12px;
+      top: 50px;
+      display: none;
+      font-size: 10px;
+      padding: 6px 10px;
+    }
+
+    #dockPanel.show {
+      display: block;
+    }
+
+    /* Modo móvil */
+    @media (max-width: 768px) {
+      #controlPanel {
+        width: 100%;
+        max-width: 100%;
+      }
+
+      #controlPanel.floating {
+        width: calc(100% - 24px);
+        right: 12px;
+        top: auto;
+        bottom: 12px;
+        max-height: 50vh;
+      }
+
+      #dockPanel {
+        right: 12px;
+        top: 50px;
+      }
+
+      canvas {
+        width: 100% !important;
+        height: 100% !important;
+      }
+    }
+
+    /* Modo desktop - panel ancho */
+    @media (min-width: 1600px) {
+      #controlPanel {
+        width: 420px;
+      }
+
+      #controlPanel.floating {
+        width: 400px;
+      }
+    }
+
+    .section {
+      margin-bottom: 20px;
+      border-bottom: 1px solid rgba(255,107,157,0.3);
+      padding-bottom: 14px;
+    }
+
+    .section-title {
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: #ff6b9d;
+      font-size: 10px;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+
+    .control-group {
+      margin-bottom: 10px;
+    }
+
+    .control-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      margin-bottom: 4px;
+      opacity: 0.8;
+    }
+
+    input[type=range] {
+      width: 100%;
+      cursor: pointer;
+      accent-color: #ff6b9d;
+      height: 4px;
+    }
+
+    input[type=color] {
+      width: 40px;
+      height: 30px;
+      border: 1px solid #ff6b9d;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    input[type=text], input[type=number] {
+      width: 100%;
+      padding: 6px;
+      background: rgba(255,107,157,0.1);
+      border: 1px solid #ff6b9d;
+      color: #fff;
+      border-radius: 4px;
+      font-size: 11px;
+      box-sizing: border-box;
+    }
+
+    .color-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+    }
+
+    .color-box {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+
+    button {
+      width: 100%;
+      background: rgba(255,107,157,0.3);
+      border: 1px solid #ff6b9d;
+      color: #fff;
+      padding: 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 11px;
+      transition: all 0.2s;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    button:hover {
+      background: rgba(255,107,157,0.6);
+    }
+
+    button.danger {
+      background: rgba(220,20,60,0.3);
+      border-color: #dc143c;
+      color: #ff6b9d;
+    }
+
+    button.danger:hover {
+      background: rgba(220,20,60,0.6);
+    }
+
+    .color-preview {
+      width: 100%;
+      height: 20px;
+      border-radius: 4px;
+      border: 1px solid #ff6b9d;
+    }
+
+    .info-text {
+      font-size: 10px;
+      opacity: 0.6;
+      margin-top: 4px;
+    }
+
+    #info{position:absolute;left:12px;top:12px;z-index:100;font-size:11px;opacity:.85;background:rgba(0,0,0,0.4);padding:8px 10px;border-radius:6px;border-left:3px solid #ff6b9d}
+    #stats{position:absolute;left:12px;bottom:16px;z-index:100;font-size:10px;opacity:.7;background:rgba(0,0,0,0.4);padding:8px 10px;border-radius:6px;font-family:monospace;line-height:1.4}
+
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(0,0,0,0.3);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255,107,157,0.5);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255,107,157,0.8);
+    }
+  </style>
+</head>
+<body>
+  <div class="star-field" id="starField"></div>
+  <div class="dust" id="dust"></div>
+  
+  <button class="toggle-panel" id="togglePanel">⚙️ PANEL</button>
+  <button class="toggle-panel" id="dockPanel">📌 ACOPLAR</button>
+  
+  <div id="controlPanel">
+    <div class="section">
+      <div class="section-title">🌌 Galaxia</div>
+      
+      <div class="control-group">
+        <div class="control-label">
+          <span>Partículas</span>
+          <span id="particleCountVal">15000</span>
+        </div>
+        <input id="particleCount" type="range" min="5000" max="30000" step="1000" value="15000">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Brazos</span>
+          <span id="armCountVal">5</span>
+        </div>
+        <input id="armCount" type="range" min="2" max="10" step="1" value="5">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Radio</span>
+          <span id="galaxyRadiusVal">140</span>
+        </div>
+        <input id="galaxyRadius" type="range" min="50" max="250" step="10" value="140">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Densidad</span>
+          <span id="densityVal">1.00</span>
+        </div>
+        <input id="density" type="range" min="0.35" max="2.5" step="0.01" value="1">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Spin</span>
+          <span id="spinVal">1.60</span>
+        </div>
+        <input id="spin" type="range" min="0.5" max="3.0" step="0.1" value="1.6">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Brillo</span>
+          <span id="brightnessVal">1.00</span>
+        </div>
+        <input id="brightness" type="range" min="0.3" max="2.0" step="0.1" value="1.0">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Tamaño Partícula</span>
+          <span id="particleSizeVal">2.0</span>
+        </div>
+        <input id="particleSize" type="range" min="0.5" max="5.0" step="0.1" value="2.0">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">🎨 Colores</div>
+      <div class="color-row">
+        <div class="color-box">
+          <span>Interior</span>
+          <input id="colorInner" type="color" value="#fffaeb">
+          <div id="colorInnerPreview" class="color-preview"></div>
+        </div>
+        <div class="color-box">
+          <span>Medio</span>
+          <input id="colorMid" type="color" value="#ff6b9d">
+          <div id="colorMidPreview" class="color-preview"></div>
+        </div>
+        <div class="color-box">
+          <span>Exterior</span>
+          <input id="colorOuter" type="color" value="#1a0033">
+          <div id="colorOuterPreview" class="color-preview"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">⚫ Agujero Negro</div>
+      
+      <div class="control-group">
+        <div class="control-label">
+          <span>Radio</span>
+          <span id="bhRadiusVal">10</span>
+        </div>
+        <input id="bhRadius" type="range" min="5" max="30" step="1" value="10">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Halo Size</span>
+          <span id="haloSizeVal">80</span>
+        </div>
+        <input id="haloSize" type="range" min="40" max="150" step="5" value="80">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Halo Pulso</span>
+          <span id="haloPulseVal">1.0</span>
+        </div>
+        <input id="haloPulse" type="range" min="0.2" max="3.0" step="0.1" value="1.0">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Anillo 1 Radio</span>
+          <span id="ring1RadiusVal">32</span>
+        </div>
+        <input id="ring1Radius" type="range" min="20" max="60" step="2" value="32">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Anillo 1 Grosor</span>
+          <span id="ring1ThicknessVal">7</span>
+        </div>
+        <input id="ring1Thickness" type="range" min="2" max="15" step="1" value="7">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Anillo 2 Radio</span>
+          <span id="ring2RadiusVal">24</span>
+        </div>
+        <input id="ring2Radius" type="range" min="15" max="50" step="2" value="24">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Anillo 2 Grosor</span>
+          <span id="ring2ThicknessVal">5</span>
+        </div>
+        <input id="ring2Thickness" type="range" min="2" max="12" step="1" value="5">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Color Anillo 1</span>
+        </div>
+        <input id="ring1Color" type="color" value="#ffaa33">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Color Anillo 2</span>
+        </div>
+        <input id="ring2Color" type="color" value="#ff6b9d">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Opacidad Anillo 1</span>
+          <span id="ring1OpacityVal">0.25</span>
+        </div>
+        <input id="ring1Opacity" type="range" min="0" max="1" step="0.05" value="0.25">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Opacidad Anillo 2</span>
+          <span id="ring2OpacityVal">0.20</span>
+        </div>
+        <input id="ring2Opacity" type="range" min="0" max="1" step="0.05" value="0.20">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">✨ Destellos</div>
+      
+      <div class="control-group">
+        <div class="control-label">
+          <span>Pool Size</span>
+          <span id="flarePoolVal">180</span>
+        </div>
+        <input id="flarePool" type="range" min="50" max="300" step="10" value="180">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Frecuencia</span>
+          <span id="flareFreqVal">0.16</span>
+        </div>
+        <input id="flareFreq" type="range" min="0.05" max="0.5" step="0.01" value="0.16">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Velocidad Máx</span>
+          <span id="flareSpeedVal">80</span>
+        </div>
+        <input id="flareSpeed" type="range" min="20" max="200" step="10" value="80">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Duración</span>
+          <span id="flareDurationVal">0.90</span>
+        </div>
+        <input id="flareDuration" type="range" min="0.3" max="2.0" step="0.1" value="0.9">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">🎥 Cámara</div>
+      
+      <div class="control-group">
+        <div class="control-label">
+          <span>FOV</span>
+          <span id="cameraFovVal">65</span>
+        </div>
+        <input id="cameraFov" type="range" min="30" max="120" step="5" value="65">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Zoom</span>
+          <span id="cameraZoomVal">240</span>
+        </div>
+        <input id="cameraZoom" type="range" min="100" max="500" step="10" value="240">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Rot X</span>
+          <span id="rotXVal">0.00</span>
+        </div>
+        <input id="rotX" type="range" min="-6.28" max="6.28" step="0.1" value="0">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Rot Y</span>
+          <span id="rotYVal">0.00</span>
+        </div>
+        <input id="rotY" type="range" min="-6.28" max="6.28" step="0.1" value="0">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">🌌 Fondo</div>
+      
+      <div class="control-group">
+        <div class="control-label">
+          <span>Color Gradiente 1</span>
+        </div>
+        <input id="bgColor1" type="color" value="#0a0015">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Color Gradiente 2</span>
+        </div>
+        <input id="bgColor2" type="color" value="#000000">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Color Gradiente 3</span>
+        </div>
+        <input id="bgColor3" type="color" value="#0f0020">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Estrellas</span>
+          <span id="starCountVal">1.0x</span>
+        </div>
+        <input id="starCount" type="range" min="0.3" max="2.0" step="0.1" value="1.0">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Velocidad Dust</span>
+          <span id="dustSpeedVal">1.0x</span>
+        </div>
+        <input id="dustSpeed" type="range" min="0.2" max="3.0" step="0.1" value="1.0">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">🎛️ Post-Procesado</div>
+      
+      <div class="control-group">
+        <div class="control-label">
+          <span>Bloom</span>
+          <span id="bloomVal">0.8</span>
+        </div>
+        <input id="bloom" type="range" min="0" max="2" step="0.1" value="0.8">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Exposición</span>
+          <span id="exposureVal">1.0</span>
+        </div>
+        <input id="exposure" type="range" min="0.5" max="2.0" step="0.1" value="1.0">
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">
+          <span>Contraste</span>
+          <span id="contrastVal">1.0</span>
+        </div>
+        <input id="contrast" type="range" min="0.5" max="1.5" step="0.05" value="1.0">
+      </div>
+    </div>
+
+    <div class="section">
+      <button id="resetAll" class="danger">Resetear Todo</button>
+      <button id="randomize">Aleatorio</button>
+    </div>
+
+    <div class="info-text">
+      Panel de Control Total HD v1.1<br>
+      Deiby Andrés Lozano<br>
+      Colombia 🇨🇴
+    </div>
+  </div>
+
+  <div id="info">🌌 Galaxy 3D HD | Control Total | Touch/Drag para rotar</div>
+  <div id="stats"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+  (function(){
+    // Generar estrellas procedurales
+    function generateStars(multiplier = 1.0) {
+      const starField = document.getElementById('starField');
+      starField.innerHTML = '';
+      const starCount = Math.floor(window.innerWidth * window.innerHeight / 5000 * multiplier);
+      
+      for(let i = 0; i < starCount; i++) {
+        const star = document.createElement('div');
+        star.className = 'star';
+        
+        const x = Math.random() * 100;
+        const y = Math.random() * 100;
+        const size = Math.random() * 2 + 0.5;
+        const delay = Math.random() * 3;
+        
+        star.style.left = x + '%';
+        star.style.top = y + '%';
+        star.style.width = size + 'px';
+        star.style.height = size + 'px';
+        star.style.animationDelay = delay + 's';
+        star.style.opacity = Math.random() * 0.7 + 0.3;
+        
+        starField.appendChild(star);
+      }
+    }
+
+    generateStars();
+
+    // Estado global
+    let state = {
+      particleCount: 15000,
+      armCount: 5,
+      galaxyRadius: 140,
+      density: 1,
+      spin: 1.6,
+      brightness: 1.0,
+      particleSize: 2.0,
+      colorInner: {r: 1, g: 0.98, b: 0.92},
+      colorMid: {r: 1, g: 0.42, b: 0.615},
+      colorOuter: {r: 0.1, g: 0, b: 0.2},
+      bhRadius: 10,
+      haloSize: 80,
+      haloPulse: 1.0,
+      ring1Radius: 32,
+      ring1Thickness: 7,
+      ring2Radius: 24,
+      ring2Thickness: 5,
+      ring1Color: {r: 1, g: 0.67, b: 0.2},
+      ring2Color: {r: 1, g: 0.42, b: 0.615},
+      ring1Opacity: 0.25,
+      ring2Opacity: 0.20,
+      flarePool: 180,
+      flareFreq: 0.16,
+      flareSpeed: 80,
+      flareDuration: 0.9,
+      cameraFov: 65,
+      cameraZoom: 240,
+      rotX: 0,
+      rotY: 0,
+      bloom: 0.8,
+      exposure: 1.0,
+      contrast: 1.0,
+      needsRebuild: false
+    };
+
+    // Scene setup
+    const scene = new THREE.Scene();
+    let camera = new THREE.PerspectiveCamera(state.cameraFov, innerWidth/innerHeight, 0.1, 3000);
+    camera.position.z = state.cameraZoom;
+
+    const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.setClearColor(0x000000, 0);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = state.exposure;
+    document.body.appendChild(renderer.domElement);
+
+    // Variables para geometría
+    let basePos, positions, colors, baseColors, geometry, points;
+    let bhGroup, torMesh1, torMesh2, halo, bhMesh;
+    let flarePool = [];
+
+    // Post-processing setup
+    let composer;
+    let bloomPass;
+    
+    // Inicializar post-procesado
+    function initPostProcessing() {
+      // Para simplificar, usamos un efecto de bloom básico
+      // En una implementación completa, se usaría THREE.EffectComposer
+      // y passes como BloomPass, pero aquí lo simulamos con materiales
+      renderer.toneMappingExposure = state.exposure;
+    }
+
+    function hexToRgb(hex) {
+      const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+      return result ? {
+        r: parseInt(result[1], 16) / 255,
+        g: parseInt(result[2], 16) / 255,
+        b: parseInt(result[3], 16) / 255
+      } : {r:1,g:1,b:1};
+    }
+
+    function rgbToHex(r, g, b) {
+      return "#" + ((1 << 24) + (Math.round(r * 255) << 16) + (Math.round(g * 255) << 8) + Math.round(b * 255)).toString(16).slice(1);
+    }
+
+    function buildGalaxy() {
+      // Limpiar escena
+      if(geometry) geometry.dispose();
+      if(points) scene.remove(points);
+      
+      basePos = new Float32Array(state.particleCount * 3);
+      positions = new Float32Array(state.particleCount * 3);
+      colors = new Float32Array(state.particleCount * 3);
+      baseColors = new Float32Array(state.particleCount * 3);
+
+      const colInner = new THREE.Color(state.colorInner.r, state.colorInner.g, state.colorInner.b);
+      const colMid = new THREE.Color(state.colorMid.r, state.colorMid.g, state.colorMid.b);
+      const colOuter = new THREE.Color(state.colorOuter.r, state.colorOuter.g, state.colorOuter.b);
+
+      let idx = 0;
+      for(let i = 0; i < state.particleCount; i++){
+        const r = Math.pow(Math.random(), 1.15) * state.galaxyRadius;
+        const arm = i % state.armCount;
+        const armAngle = (arm / state.armCount) * Math.PI * 2;
+        const angle = armAngle + r * state.spin * 0.02 + (Math.random()-0.5) * 0.3;
+        const x = Math.cos(angle) * r + (Math.random()-0.5) * 8;
+        const y = (Math.random()-0.5) * 8 * (1 - r/state.galaxyRadius);
+        const z = Math.sin(angle) * r + (Math.random()-0.5) * 8;
+        
+        basePos[idx+0] = x; basePos[idx+1] = y; basePos[idx+2] = z;
+        positions[idx+0] = x; positions[idx+1] = y; positions[idx+2] = z;
+
+        const t = r / state.galaxyRadius;
+        const c = new THREE.Color();
+        if(t < 0.5){
+          const t2 = t * 2;
+          c.lerpColors(colInner, colMid, t2);
+        } else {
+          const t2 = (t - 0.5) * 2;
+          c.lerpColors(colMid, colOuter, t2);
+        }
+        colors[idx+0] = c.r; colors[idx+1] = c.g; colors[idx+2] = c.b;
+        baseColors[idx+0] = c.r; baseColors[idx+1] = c.g; baseColors[idx+2] = c.b;
+        idx += 3;
+      }
+
+      geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+      const mat = new THREE.PointsMaterial({
+        size: state.particleSize,
+        vertexColors: true,
+        blending: THREE.AdditiveBlending,
+        transparent: true,
+        depthWrite: false,
+        sizeAttenuation: true
+      });
+      points = new THREE.Points(geometry, mat);
+      scene.add(points);
+    }
+
+    function buildBlackHole() {
+      if(bhGroup) scene.remove(bhGroup);
+      bhGroup = new THREE.Group();
+      scene.add(bhGroup);
+
+      // Black hole center - mejorado con material más detallado
+      const bhGeom = new THREE.SphereGeometry(state.bhRadius, 64, 64);
+      const bhMat = new THREE.MeshBasicMaterial({
+        color: 0x0a0a1a,
+        transparent: true,
+        opacity: 0.9
+      });
+      bhMesh = new THREE.Mesh(bhGeom, bhMat);
+      bhGroup.add(bhMesh);
+
+      // Halo - mejor resolución
+      const haloCanvas = document.createElement('canvas');
+      haloCanvas.width = 512; haloCanvas.height = 512;
+      const hc = haloCanvas.getContext('2d');
+      const grad = hc.createRadialGradient(256,256,32,256,256,256);
+      grad.addColorStop(0, 'rgba(255,240,200,1)');
+      grad.addColorStop(0.15, 'rgba(255,200,180,0.9)');
+      grad.addColorStop(0.3, 'rgba(255,107,157,0.8)');
+      grad.addColorStop(0.5, 'rgba(255,100,180,0.5)');
+      grad.addColorStop(0.7, 'rgba(100,20,120,0.2)');
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      hc.fillStyle = grad;
+      hc.fillRect(0,0,512,512);
+      const haloTex = new THREE.CanvasTexture(haloCanvas);
+      const haloMat = new THREE.SpriteMaterial({
+        map: haloTex, 
+        blending: THREE.AdditiveBlending, 
+        transparent: true, 
+        depthWrite: false,
+        opacity: 0.8
+      });
+      halo = new THREE.Sprite(haloMat);
+      halo.scale.set(state.haloSize, state.haloSize, 1);
+      bhGroup.add(halo);
+
+      // Rings - mejor geometría
+      const tor1 = new THREE.TorusGeometry(state.ring1Radius, state.ring1Thickness, 32, 200);
+      const c1 = new THREE.Color(state.ring1Color.r, state.ring1Color.g, state.ring1Color.b);
+      const torMat1 = new THREE.MeshBasicMaterial({
+        color: c1, 
+        transparent: true, 
+        opacity: state.ring1Opacity, 
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide
+      });
+      torMesh1 = new THREE.Mesh(tor1, torMat1);
+      torMesh1.rotation.x = Math.PI/2.1;
+      bhGroup.add(torMesh1);
+
+      const tor2 = new THREE.TorusGeometry(state.ring2Radius, state.ring2Thickness, 24, 160);
+      const c2 = new THREE.Color(state.ring2Color.r, state.ring2Color.g, state.ring2Color.b);
+      const torMat2 = new THREE.MeshBasicMaterial({
+        color: c2, 
+        transparent: true, 
+        opacity: state.ring2Opacity, 
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide
+      });
+      torMesh2 = new THREE.Mesh(tor2, torMat2);
+      torMesh2.rotation.x = Math.PI/2.3;
+      bhGroup.add(torMesh2);
+    }
+
+    function buildFlares() {
+      flarePool.forEach(f => scene.remove(f.sprite));
+      flarePool = [];
+
+      // Mejor resolución para destellos
+      const flareCanvas = document.createElement('canvas');
+      flareCanvas.width = 128; flareCanvas.height = 128;
+      const fc = flareCanvas.getContext('2d');
+      const g2 = fc.createRadialGradient(64,64,4,64,64,64);
+      g2.addColorStop(0, 'rgba(255,250,200,1)');
+      g2.addColorStop(0.1, 'rgba(255,220,180,0.95)');
+      g2.addColorStop(0.2, 'rgba(255,180,160,0.9)');
+      g2.addColorStop(0.35, 'rgba(255,100,150,0.7)');
+      g2.addColorStop(0.6, 'rgba(200,50,100,0.3)');
+      g2.addColorStop(1, 'rgba(0,0,0,0)');
+      fc.fillStyle = g2;
+      fc.fillRect(0,0,128,128);
+      const flareTex = new THREE.CanvasTexture(flareCanvas);
+
+      for(let i = 0; i < state.flarePool; i++){
+        const mat = new THREE.SpriteMaterial({
+          map: flareTex, 
+          blending: THREE.AdditiveBlending, 
+          transparent: true, 
+          depthWrite: false
+        });
+        const sp = new THREE.Sprite(mat);
+        sp.visible = false;
+        sp.scale.set(8,8,1);
+        scene.add(sp);
+        flarePool.push({sprite: sp, life: 0, maxLife: 0, vx: 0, vy: 0, vz: 0});
+      }
+    }
+
+    function spawnFlare(x,y,z){
+      for(let i = 0; i < flarePool.length; i++){
+        const f = flarePool[i];
+        if(!f.sprite.visible){
+          f.sprite.position.set(x,y,z);
+          f.sprite.scale.setScalar(8 + Math.random()*14);
+          f.sprite.material.opacity = 1.0;
+          f.life = 0;
+          f.maxLife = 0.7 + Math.random() * state.flareDuration;
+          f.vx = (Math.random()-0.5) * state.flareSpeed;
+          f.vy = (Math.random()-0.5) * state.flareSpeed;
+          f.vz = (Math.random()-0.5) * state.flareSpeed;
+          f.sprite.visible = true;
+          break;
+        }
+      }
+    }
+
+    // Construir escena inicial
+    buildGalaxy();
+    buildBlackHole();
+    buildFlares();
+    initPostProcessing();
+
+    // Panel de control
+    const toggleBtn = document.getElementById('togglePanel');
+    const dockBtn = document.getElementById('dockPanel');
+    const controlPanel = document.getElementById('controlPanel');
+    let panelOpen = true;
+    let isFloating = false;
+
+    // Detectar dispositivo
+    const isMobile = window.innerWidth <= 768;
+
+    if(isMobile) {
+      // En móvil, empezar con panel oculto y flotante
+      panelOpen = false;
+      isFloating = true;
+      controlPanel.classList.add('hidden');
+      controlPanel.classList.add('floating');
+      dockBtn.classList.add('show');
+    }
+
+    toggleBtn.addEventListener('click', () => {
+      panelOpen = !panelOpen;
+      if(panelOpen) {
+        controlPanel.classList.remove('hidden');
+      } else {
+        controlPanel.classList.add('hidden');
+        dockBtn.classList.remove('show');
+      }
+    });
+
+    dockBtn.addEventListener('click', () => {
+      isFloating = !isFloating;
+      if(isFloating) {
+        controlPanel.classList.add('floating');
+        dockBtn.textContent = '📌 ACOPLAR';
+        panelOpen = true;
+        controlPanel.classList.remove('hidden');
+      } else {
+        controlPanel.classList.remove('floating');
+        dockBtn.textContent = '📍 SOLTAR';
+        panelOpen = true;
+        controlPanel.classList.remove('hidden');
+      }
+    });
+
+    // Mapear controles
+    const controls = {
+      particleCount: document.getElementById('particleCount'),
+      armCount: document.getElementById('armCount'),
+      galaxyRadius: document.getElementById('galaxyRadius'),
+      density: document.getElementById('density'),
+      spin: document.getElementById('spin'),
+      brightness: document.getElementById('brightness'),
+      particleSize: document.getElementById('particleSize'),
+      colorInner: document.getElementById('colorInner'),
+      colorMid: document.getElementById('colorMid'),
+      colorOuter: document.getElementById('colorOuter'),
+      bhRadius: document.getElementById('bhRadius'),
+      haloSize: document.getElementById('haloSize'),
+      haloPulse: document.getElementById('haloPulse'),
+      ring1Radius: document.getElementById('ring1Radius'),
+      ring1Thickness: document.getElementById('ring1Thickness'),
+      ring2Radius: document.getElementById('ring2Radius'),
+      ring2Thickness: document.getElementById('ring2Thickness'),
+      ring1Color: document.getElementById('ring1Color'),
+      ring2Color: document.getElementById('ring2Color'),
+      ring1Opacity: document.getElementById('ring1Opacity'),
+      ring2Opacity: document.getElementById('ring2Opacity'),
+      flarePool: document.getElementById('flarePool'),
+      flareFreq: document.getElementById('flareFreq'),
+      flareSpeed: document.getElementById('flareSpeed'),
+      flareDuration: document.getElementById('flareDuration'),
+      cameraFov: document.getElementById('cameraFov'),
+      cameraZoom: document.getElementById('cameraZoom'),
+      rotX: document.getElementById('rotX'),
+      rotY: document.getElementById('rotY'),
+      bgColor1: document.getElementById('bgColor1'),
+      bgColor2: document.getElementById('bgColor2'),
+      bgColor3: document.getElementById('bgColor3'),
+      starCount: document.getElementById('starCount'),
+      dustSpeed: document.getElementById('dustSpeed'),
+      bloom: document.getElementById('bloom'),
+      exposure: document.getElementById('exposure'),
+      contrast: document.getElementById('contrast')
+    };
+
+    // Actualizar vista previa de colores
+    function updateColorPreviews() {
+      document.getElementById('colorInnerPreview').style.background = rgbToHex(state.colorInner.r, state.colorInner.g, state.colorInner.b);
+      document.getElementById('colorMidPreview').style.background = rgbToHex(state.colorMid.r, state.colorMid.g, state.colorMid.b);
+      document.getElementById('colorOuterPreview').style.background = rgbToHex(state.colorOuter.r, state.colorOuter.g, state.colorOuter.b);
+    }
+
+    // Listener para controles numéricos
+    const numControls = ['particleCount', 'armCount', 'galaxyRadius', 'density', 'spin', 'brightness', 'particleSize',
+      'bhRadius', 'haloSize', 'haloPulse', 'ring1Radius', 'ring1Thickness', 'ring2Radius', 'ring2Thickness',
+      'ring1Opacity', 'ring2Opacity', 'flarePool', 'flareFreq', 'flareSpeed', 'flareDuration',
+      'cameraFov', 'cameraZoom', 'rotX', 'rotY', 'starCount', 'dustSpeed', 'bloom', 'exposure', 'contrast'];
+
+    numControls.forEach(key => {
+      controls[key].addEventListener('input', () => {
+        const val = parseFloat(controls[key].value);
+        state[key] = val;
+        document.getElementById(key + 'Val').textContent = val.toFixed(key.includes('Color') || key === 'density' || key === 'brightness' || key.includes('Opacity') ? 2 : 0);
+
+        if(['particleCount', 'armCount', 'galaxyRadius'].includes(key)) {
+          buildGalaxy();
+        }
+        if(['bhRadius', 'haloSize', 'ring1Radius', 'ring1Thickness', 'ring2Radius', 'ring2Thickness'].includes(key)) {
+          buildBlackHole();
+        }
+        if(key === 'flarePool') {
+          buildFlares();
+        }
+        if(key === 'particleSize' && geometry && geometry.userData.mat) {
+          geometry.userData.mat.size = val;
+        }
+        if(key === 'cameraFov') {
+          camera.fov = val;
+          camera.updateProjectionMatrix();
+        }
+        if(key === 'cameraZoom') {
+          camera.position.z = val;
+        }
+        if(['starCount'].includes(key)) {
+          generateStars(val);
+        }
+        if(key === 'exposure') {
+          renderer.toneMappingExposure = val;
+        }
+      });
+    });
+
+    // Color controls
+    ['colorInner', 'colorMid', 'colorOuter'].forEach(key => {
+      controls[key].addEventListener('input', () => {
+        const rgb = hexToRgb(controls[key].value);
+        state[key] = rgb;
+        buildGalaxy();
+        updateColorPreviews();
+      });
+    });
+
+    controls.ring1Color.addEventListener('input', () => {
+      state.ring1Color = hexToRgb(controls.ring1Color.value);
+      buildBlackHole();
+    });
+
+    controls.ring2Color.addEventListener('input', () => {
+      state.ring2Color = hexToRgb(controls.ring2Color.value);
+      buildBlackHole();
+    });
+
+    // Fondo
+    controls.bgColor1.addEventListener('input', () => {
+      updateBgGradient();
+    });
+    controls.bgColor2.addEventListener('input', () => {
+      updateBgGradient();
+    });
+    controls.bgColor3.addEventListener('input', () => {
+      updateBgGradient();
+    });
+
+    controls.dustSpeed.addEventListener('input', () => {
+      const dust = document.getElementById('dust');
+      const speed = parseFloat(controls.dustSpeed.value);
+      dust.style.animationDuration = (60 / speed) + 's';
+    });
+
+    function updateBgGradient() {
+      const c1 = controls.bgColor1.value;
+      const c2 = controls.bgColor2.value;
+      const c3 = controls.bgColor3.value;
+      document.body.style.setProperty('--bg1', c1);
+      document.body.style.setProperty('--bg2', c2);
+      document.body.style.setProperty('--bg3', c3);
+      
+      document.body.style.background = `
+        linear-gradient(180deg, ${c1} 0%, ${c2} 50%, ${c3} 100%)
+      `;
+    }
+
+    // Botones
+    document.getElementById('resetAll').addEventListener('click', () => {
+      location.reload();
+    });
+
+    document.getElementById('randomize').addEventListener('click', () => {
+      controls.particleCount.value = 10000 + Math.random() * 15000;
+      controls.armCount.value = 3 + Math.floor(Math.random() * 6);
+      controls.galaxyRadius.value = 80 + Math.random() * 120;
+      controls.density.value = 0.5 + Math.random() * 1.8;
+      controls.spin.value = 0.8 + Math.random() * 1.8;
+      controls.brightness.value = 0.6 + Math.random() * 1.0;
+      controls.particleSize.value = 0.8 + Math.random() * 3.0;
+      controls.colorInner.value = '#' + Math.floor(Math.random()*16777215).toString(16);
+      controls.colorMid.value = '#' + Math.floor(Math.random()*16777215).toString(16);
+      controls.colorOuter.value = '#' + Math.floor(Math.random()*16777215).toString(16);
+      controls.haloSize.value = 50 + Math.random() * 80;
+      controls.haloPulse.value = 0.5 + Math.random() * 2.0;
+      controls.flareFreq.value = 0.08 + Math.random() * 0.3;
+      controls.bloom.value = 0.5 + Math.random() * 1.5;
+      controls.exposure.value = 0.7 + Math.random() * 1.0;
+
+      Object.keys(controls).forEach(key => {
+        controls[key].dispatchEvent(new Event('input'));
+      });
+    });
+
+    updateColorPreviews();
+
+    const statsDiv = document.getElementById('stats');
+    let frameCount = 0, lastTime = performance.now();
+    let time = 0;
+    const posAttr = geometry.attributes.position;
+
+    function animate(){
+      requestAnimationFrame(animate);
+      time += 0.007;
+
+      if(points) {
+        points.rotation.y += 0.002 * state.spin;
+        points.rotation.x += 0.0008 * state.spin;
+        points.rotation.x = state.rotX;
+        points.rotation.y = state.rotY;
+      }
+
+      // Update positions
+      if(geometry && posAttr) {
+        const posData = posAttr.array;
+        for(let i = 0; i < state.particleCount; i++){
+          const i3 = i*3;
+          const bx = basePos[i3], by = basePos[i3+1], bz = basePos[i3+2];
+          const ang = Math.atan2(bz, bx) + 0.35 * time * (0.5 + (i%7)/14) * state.spin;
+          const r = Math.sqrt(bx*bx + bz*bz) * state.density;
+          posData[i3+0] = Math.cos(ang) * r;
+          posData[i3+1] = by * (0.7 + 0.5 * (1/state.density));
+          posData[i3+2] = Math.sin(ang) * r;
+        }
+        posAttr.needsUpdate = true;
+
+        const colData = geometry.attributes.color.array;
+        for(let i = 0; i < state.particleCount*3; i++){
+          colData[i] = baseColors[i] * state.brightness;
+        }
+        geometry.attributes.color.needsUpdate = true;
+      }
+
+      // Black hole animation
+      if(torMesh1) torMesh1.rotation.z += 0.008;
+      if(torMesh2) torMesh2.rotation.z -= 0.006;
+      if(halo) {
+        halo.material.rotation = -time * 0.25;
+        halo.scale.set(state.haloSize + Math.sin(time*0.7)*state.haloPulse, state.haloSize + Math.sin(time*0.7)*state.haloPulse, 1);
+      }
+
+      // Flares
+      if(Math.random() < state.flareFreq){
+        const idx = Math.floor(Math.random() * state.particleCount);
+        const i3 = idx*3;
+        spawnFlare(posAttr.array[i3], posAttr.array[i3+1], posAttr.array[i3+2]);
+      }
+
+      for(let i = 0; i < flarePool.length; i++){
+        const f = flarePool[i];
+        if(f.sprite.visible){
+          f.life += 0.018;
+          const t = f.life / f.maxLife;
+          if(t >= 1){
+            f.sprite.visible = false;
+          } else {
+            f.sprite.material.opacity = (1 - t);
+            f.sprite.position.x += f.vx * 0.016;
+            f.sprite.position.y += f.vy * 0.016;
+            f.sprite.position.z += f.vz * 0.016;
+            f.sprite.scale.setScalar(8 + (14 * (1-t)));
+          }
+        }
+      }
+
+      renderer.render(scene, camera);
+
+      frameCount++;
+      const now = performance.now();
+      if(now - lastTime >= 1000){
+        statsDiv.innerHTML = `FPS: ${frameCount}<br>Particles: ${state.particleCount.toLocaleString()}<br>Density: ${state.density.toFixed(2)}x`;
+        frameCount = 0;
+        lastTime = now;
+      }
+    }
+
+    animate();
+
+    window.addEventListener('resize', () => {
+      renderer.setSize(innerWidth, innerHeight);
+      camera.aspect = innerWidth/innerHeight;
+      camera.updateProjectionMatrix();
+
+      // Ajustar modo flotante según tamaño
+      const currentMobile = window.innerWidth <= 768;
+      if(currentMobile && !isFloating && panelOpen) {
+        isFloating = true;
+        controlPanel.classList.add('floating');
+        dockBtn.classList.add('show');
+      }
+    });
+
+    let lastX = 0, lastY = 0, isTouch = false;
+    window.addEventListener('touchstart', (e) => {
+      isTouch = true;
+      lastX = e.touches[0].clientX;
+      lastY = e.touches[0].clientY;
+    }, {passive: true});
+
+    window.addEventListener('touchmove', (e) => {
+      if(!isTouch) return;
+      const tx = e.touches[0].clientX, ty = e.touches[0].clientY;
+      const dx = (tx - lastX) / window.innerWidth;
+      const dy = (ty - lastY) / window.innerHeight;
+      if(points) {
+        points.rotation.y += dx * 2;
+        points.rotation.x += dy * 1.2;
+        state.rotY = points.rotation.y;
+        state.rotX = points.rotation.x;
+        controls.rotX.value = state.rotX;
+        controls.rotY.value = state.rotY;
+      }
+      lastX = tx;
+      lastY = ty;
+    }, {passive: true});
+
+    window.addEventListener('touchend', () => { isTouch = false; });
+
+    window.addEventListener('mousemove', (e) => {
+      if(e.buttons === 1 && points){
+        const dx = (e.movementX) / window.innerWidth;
+        const dy = (e.movementY) / window.innerHeight;
+        points.rotation.y += dx * 2.5;
+        points.rotation.x += dy * 1.5;
+        state.rotY = points.rotation.y;
+        state.rotX = points.rotation.x;
+        controls.rotX.value = state.rotX;
+        controls.rotY.value = state.rotY;
+      }
+    });
+
+  })();
+  </script>
+</body>
+</html>
