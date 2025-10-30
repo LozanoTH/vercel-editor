@@ -1,202 +1,415 @@
-<!DOCTYPE html>  
-<html lang="es">  
-<head>  
-  <meta charset="UTF-8">  
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">  
-  <title>Escena natural optimizada</title>  
-  <style>  
-    html, body {  
-      margin: 0;  
-      height: 100%;  
-      overflow: hidden;  
-      background: #aee1f9;  
-    }  
-    #canvas3d {  
-      width: 100%;  
-      height: 100%;  
-      display: block;  
-    }  
-    video, canvas.salida {  
-      position: fixed;  
-      bottom: 15px;  
-      right: 15px;  
-      width: 160px;  
-      height: 120px;  
-      border-radius: 8px;  
-      object-fit: cover;  
-      opacity: 0.5;  
-      border: 1px solid rgba(0,0,0,0.1);  
-    }  
-    canvas.salida {  
-      z-index: 2;  
-    }  
-  </style>  
-</head>  
-<body>  
-  <canvas id="canvas3d"></canvas>  
-  <video id="vista" autoplay playsinline muted></video>  
-  <canvas class="salida"></canvas>  
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Suburbio Detallado - Day/Night + Hand Control</title>
+  <style>
+    html,body { margin:0; height:100%; overflow:hidden; background:#87ceeb; }
+    #canvas3d { width:100%; height:100%; display:block; }
+    video, canvas.salida {
+      position: fixed; bottom: 12px; right: 12px;
+      width: 192px; height: 144px; border-radius:8px;
+      object-fit:cover; opacity:0.55; border:1px solid rgba(0,0,0,0.12);
+      z-index: 10;
+    }
+    canvas.salida{ z-index: 11; }
+    /* simple loader */
+    #loading {
+      position:fixed; left:10px; top:10px; color:#111;
+      background:rgba(255,255,255,0.85); padding:8px 10px; border-radius:6px;
+      font-family:monospace; font-size:13px; z-index:20;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas3d"></canvas>
+  <video id="vista" autoplay playsinline muted></video>
+  <canvas class="salida"></canvas>
+  <div id="loading">Cargando assets... (puede tardar)</div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>  
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>  
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>  
+  <!-- libs -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
-  <script>  
-    const video = document.getElementById('vista');  
-    const canvas = document.querySelector('.salida');  
-    const ctx = canvas.getContext('2d');  
+  <script>
+  // ---------- CONFIG ----------
+  const MOBILE_SAFE = false; // la demo será en PC potente
+  const ASSETS = {
+    asphalt: "https://cdn.pixabay.com/photo/2017/02/20/18/03/asphalt-2087206_1280.jpg",
+    grass: "https://cdn.pixabay.com/photo/2017/03/09/12/31/grass-2131191_1280.jpg",
+    houseWall: "https://cdn.pixabay.com/photo/2016/11/18/16/38/house-1836077_1280.jpg",
+    concrete: "https://cdn.pixabay.com/photo/2016/11/29/07/09/concrete-1869827_1280.jpg",
+    roadMark: "https://cdn.pixabay.com/photo/2013/07/12/18/20/line-153534_1280.png",
+    carTex: "https://cdn.pixabay.com/photo/2013/07/13/01/24/car-156590_1280.png",
+    window: "https://cdn.pixabay.com/photo/2014/09/21/17/56/window-455441_1280.jpg"
+  };
 
-    var escena, camara3d, renderizador, cubo;  
-    var objetivoX = 0, objetivoY = 0, objetivoZoom = 5;  
-    var suavizadoX = 0, suavizadoY = 0, suavizadoZoom = 5;  
-    var manoIzquierdaPrev = null;  
+  // ---------- THREE setup ----------
+  const canvas = document.getElementById('canvas3d');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.setSize(window.innerWidth, window.innerHeight);
 
-    function iniciarEscena() {  
-      escena = new THREE.Scene();  
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x87ceeb, 40, 220);
 
-      // Fondo 360  
-      const cargador = new THREE.TextureLoader();  
-      cargador.load("x.webp", textura => {  
-        textura.mapping = THREE.EquirectangularReflectionMapping;  
-        textura.colorSpace = THREE.SRGBColorSpace;  
-        textura.minFilter = THREE.LinearFilter;  
-        textura.magFilter = THREE.LinearFilter;  
-        escena.background = textura;  
-      });  
+  const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 18, 35);
 
-      // Cámara  
-      camara3d = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);  
-      camara3d.position.set(0, 1.5, suavizadoZoom);  
+  // OrbitControls solo para demo en PC; si quieres control solo por manos, comenta la linea siguiente.
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.maxPolarAngle = Math.PI/2.1;
 
-      // Renderizador  
-      renderizador = new THREE.WebGLRenderer({ canvas: document.getElementById('canvas3d'), antialias: true });  
-      renderizador.setSize(window.innerWidth, window.innerHeight);  
-      renderizador.shadowMap.enabled = true;  
-      renderizador.shadowMap.type = THREE.PCFSoftShadowMap;  
-      renderizador.setFrustumCulled = true; // activa culling por frustum  
+  // ---------- LIGHTING & DAY/NIGHT ----------
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.65);
+  scene.add(hemi);
 
-      // Luces  
-      const luzSol = new THREE.DirectionalLight(0xffffff, 1.1);  
-      luzSol.position.set(10, 20, 10);  
-      luzSol.castShadow = true;  
-      escena.add(luzSol);  
-      escena.add(new THREE.AmbientLight(0xffffff, 0.6));  
+  const directional = new THREE.DirectionalLight(0xffffff, 1.0);
+  directional.position.set(30, 60, 10);
+  directional.castShadow = true;
+  directional.shadow.camera.left = -40;
+  directional.shadow.camera.right = 40;
+  directional.shadow.camera.top = 40;
+  directional.shadow.camera.bottom = -40;
+  directional.shadow.mapSize.set(2048,2048);
+  scene.add(directional);
 
-      // Cubo  
-      const geoCubo = new THREE.BoxGeometry(1.0, 1.0, 1.0);  
-      const matCubo = new THREE.MeshStandardMaterial({  
-        color: 0x448aff,  
-        metalness: 0.2,  
-        roughness: 0.3,  
-        side: THREE.FrontSide // solo caras visibles  
-      });  
-      cubo = new THREE.Mesh(geoCubo, matCubo);  
-      cubo.castShadow = true;  
-      cubo.frustumCulled = true;  
-      escena.add(cubo);  
+  // ambient for night
+  const nightAmbient = new THREE.AmbientLight(0x111133, 0.0);
+  scene.add(nightAmbient);
 
-      // Piso optimizado  
-      cargador.load("piso.webp", textura => {  
-        textura.wrapS = textura.wrapT = THREE.RepeatWrapping;  
-        textura.repeat.set(20, 20);  
+  // ---------- LOAD TEXTURES ----------
+  const loader = new THREE.TextureLoader();
+  const textures = {};
+  let toLoad = Object.keys(ASSETS).length;
+  const loadingDiv = document.getElementById('loading');
 
-        const geoPiso = new THREE.PlaneGeometry(10, 10);  
-        const matPiso = new THREE.MeshStandardMaterial({  
-          map: textura,  
-          roughness: 1,  
-          metalness: 0,  
-          side: THREE.FrontSide  
-        });  
-        const piso = new THREE.Mesh(geoPiso, matPiso);  
-        piso.rotation.x = -Math.PI / 2;  
-        piso.position.y = -1.2;  
-        piso.receiveShadow = true;  
-        piso.frustumCulled = true;  
-        escena.add(piso);  
-      });  
+  Object.entries(ASSETS).forEach(([k,url])=>{
+    loader.load(url, tex => {
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      textures[k] = tex;
+      if (--toLoad === 0) initScene();
+    }, undefined, err => {
+      console.warn("Error loading", url, err);
+      if (--toLoad === 0) initScene();
+    });
+  });
 
-      escena.fog = new THREE.Fog(0xaee1f9, 15, 80);  
+  // ---------- UTILS ----------
+  function rand(min, max){ return Math.random()*(max-min)+min; }
 
-      window.addEventListener('resize', () => {  
-        camara3d.aspect = window.innerWidth / window.innerHeight;  
-        camara3d.updateProjectionMatrix();  
-        renderizador.setSize(window.innerWidth, window.innerHeight);  
-      });  
+  // ---------- MAIN SCENE BUILD ----------
+  function initScene(){
+    // ground large grass
+    const grassMat = new THREE.MeshStandardMaterial({ map: textures.grass });
+    textures.grass.repeat.set(120,120);
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(600,600), grassMat);
+    ground.rotation.x = -Math.PI/2;
+    ground.receiveShadow = true;
+    scene.add(ground);
 
-      animar();  
-    }  
+    // main avenue - long asphalt
+    const asphaltTex = textures.asphalt; asphaltTex.repeat.set(1,60);
+    const asphaltMat = new THREE.MeshStandardMaterial({ map: asphaltTex });
+    const avenue = new THREE.Mesh(new THREE.PlaneGeometry(20, 500), asphaltMat);
+    avenue.rotation.x = -Math.PI/2;
+    avenue.position.y = 0.01;
+    avenue.receiveShadow = true;
+    scene.add(avenue);
 
-    function animar() {  
-      requestAnimationFrame(animar);  
+    // road markings as thin planes with alpha
+    const roadMarkTex = textures.roadMark; roadMarkTex.repeat.set(1,60);
+    const markMat = new THREE.MeshBasicMaterial({ map: roadMarkTex, transparent:true, opacity:0.95 });
+    const mark = new THREE.Mesh(new THREE.PlaneGeometry(1, 500), markMat);
+    mark.rotation.x = -Math.PI/2;
+    mark.position.y = 0.02;
+    scene.add(mark);
 
-      // suavizado  
-      suavizadoX += (objetivoX - suavizadoX) * 0.09;  
-      suavizadoY += (objetivoY - suavizadoY) * 0.09;  
-      suavizadoZoom += (objetivoZoom - suavizadoZoom) * 0.08;  
+    // raised sidewalks (high sides)
+    const sideMat = new THREE.MeshStandardMaterial({ map: textures.concrete });
+    textures.concrete.repeat.set(10,50);
+    const sidewalkL = new THREE.Mesh(new THREE.PlaneGeometry(8, 500), sideMat);
+    sidewalkL.rotation.x = -Math.PI/2;
+    sidewalkL.position.set(-14, 0.25, 0);
+    sidewalkL.receiveShadow = true;
+    scene.add(sidewalkL);
 
-      const radio = suavizadoZoom;  
-      const y = Math.max(0.8, radio * Math.sin(suavizadoX) + 1.2);  
-      const x = radio * Math.sin(suavizadoY) * Math.cos(suavizadoX);  
-      const z = radio * Math.cos(suavizadoY) * Math.cos(suavizadoX);  
+    const sidewalkR = sidewalkL.clone();
+    sidewalkR.position.set(14, 0.25, 0);
+    scene.add(sidewalkR);
 
-      camara3d.position.set(x, y, z);  
-      camara3d.lookAt(0, 0, 0);  
+    // add curb (boxes) to simulate height
+    const curbMat = new THREE.MeshStandardMaterial({ color:0x999999 });
+    const curbL = new THREE.Mesh(new THREE.BoxGeometry(8,0.5,500), curbMat);
+    curbL.position.set(-14,0,0); curbL.rotation.x = 0; curbL.receiveShadow = true;
+    scene.add(curbL);
+    const curbR = curbL.clone(); curbR.position.set(14,0,0); scene.add(curbR);
 
-      renderizador.render(escena, camara3d);  
-    }  
+    // Create many houses/buildings using InstancedMesh for perf
+    const houseCountPerSide = 24;
+    const totalHouses = houseCountPerSide * 2;
+    const houseGeo = new THREE.BoxGeometry(6,4,6);
+    const roofGeo = new THREE.ConeGeometry(4.5,2,4);
+    const houseMat = new THREE.MeshStandardMaterial({ map: textures.houseWall });
+    textures.houseWall.repeat.set(1,1);
+    const roofMat = new THREE.MeshStandardMaterial({ color: 0x6b3b2a });
 
-    function distancia(a, b) {  
-      return Math.hypot(a.x - b.x, a.y - b.y);  
-    }  
+    // Create groups manually (Instanced for base)
+    const houses = new THREE.Group();
+    for(let side=-1; side<=1; side+=2){
+      for(let i=0;i<houseCountPerSide;i++){
+        const z = -240 + i * 20 + rand(-2,2) + (side===1?5:-5);
+        const x = side * (22 + rand(-1,1) + (i%3===0?2:0));
+        // base
+        const base = new THREE.Mesh(houseGeo, houseMat);
+        base.position.set(x, 2, z);
+        base.castShadow = true; base.receiveShadow = true;
+        // roof
+        const roof = new THREE.Mesh(roofGeo, roofMat);
+        roof.position.set(x, 5, z);
+        roof.rotation.y = Math.PI/4;
+        roof.castShadow = true;
+        // small porch box
+        const porch = new THREE.Mesh(new THREE.BoxGeometry(2,1.2,1.5), new THREE.MeshStandardMaterial({color:0x333333}));
+        porch.position.set(x - (side*1.8), 0.6, z - 1.8);
+        porch.castShadow=true; porch.receiveShadow=true;
 
-    const manos = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });  
-    manos.setOptions({  
-      maxNumHands: 2,  
-      modelComplexity: 0,  
-      selfieMode: true,  
-      minDetectionConfidence: 0.5,  
-      minTrackingConfidence: 0.5  
-    });  
+        houses.add(base); houses.add(roof); houses.add(porch);
 
-    manos.onResults(resultado => {  
-      ctx.clearRect(0, 0, canvas.width, canvas.height);  
-      ctx.drawImage(resultado.image, 0, 0, canvas.width, canvas.height);  
+        // small decorative objects: mailbox, bin
+        const mailbox = new THREE.Mesh(new THREE.BoxGeometry(0.2,0.5,0.2), new THREE.MeshStandardMaterial({color:0x222222}));
+        mailbox.position.set(x - (side*0.8), 0.5, z + 2.6);
+        houses.add(mailbox);
+        if (Math.random()>0.7){
+          const bin = new THREE.Mesh(new THREE.BoxGeometry(0.5,0.8,0.5), new THREE.MeshStandardMaterial({color:0x2f4f4f}));
+          bin.position.set(x + (side*1.2), 0.4, z + rand(-2,2));
+          houses.add(bin);
+        }
 
-      if (!resultado.multiHandLandmarks) return;  
+        // small windows as decals (simple boxes)
+        const win = new THREE.Mesh(new THREE.PlaneGeometry(1.2,0.9), new THREE.MeshStandardMaterial({map:textures.window}));
+        win.position.set(x, 2.4, z + 2.9);
+        win.rotation.y = 0;
+        houses.add(win);
+      }
+    }
+    scene.add(houses);
 
-      resultado.multiHandLandmarks.forEach((puntos, i) => {  
-        const muñeca = puntos[0];  
-        const pulgar = puntos[4];  
-        const indice = puntos[8];  
-        const mano = resultado.multiHandedness[i].label.toLowerCase();  
+    // Add taller apartment buildings at intervals (to break monotony)
+    for(let i=0;i<8;i++){
+      const z = -200 + i*60 + rand(-6,6);
+      const x = (Math.random()>0.5? -40 : 40);
+      const h = 8 + Math.floor(Math.random()*6);
+      const apt = new THREE.Mesh(new THREE.BoxGeometry(10,h,10), new THREE.MeshStandardMaterial({color:0xbdbdbd}));
+      apt.position.set(x, h/2, z);
+      apt.castShadow = true; apt.receiveShadow=true;
+      scene.add(apt);
+    }
 
-        if (mano === "left") {  
-          if (manoIzquierdaPrev) {  
-            const dx = (muñeca.x - manoIzquierdaPrev.x);  
-            const dy = (muñeca.y - manoIzquierdaPrev.y);  
-            objetivoY -= dx * 3;  
-            objetivoX -= dy * 3;  
-            objetivoX = Math.max(-Math.PI / 4, Math.min(Math.PI / 4, objetivoX));  
-          }  
-          manoIzquierdaPrev = { x: muñeca.x, y: muñeca.y };  
-        }  
+    // trees using instanced-ish clones
+    const trees = new THREE.Group();
+    for(let i=0;i<140;i++){
+      const tx = rand(-120,120);
+      let tz = rand(-240,240);
+      // avoid placing over main asphalt
+      if (Math.abs(tx) < 12 && Math.abs(tz) < 250) {
+        if (Math.random()>0.6) tz += (tx>0? 18 : -18);
+        else tz += (Math.random()>0.5? 40 : -40);
+      }
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2,0.25,1.2), new THREE.MeshStandardMaterial({color:0x6b3b2a}));
+      trunk.position.set(tx,0.6,tz);
+      const crown = new THREE.Mesh(new THREE.SphereGeometry(rand(0.8,1.6),8,8), new THREE.MeshStandardMaterial({color:0x1b5e20}));
+      crown.position.set(tx,1.5,tz);
+      trunk.castShadow=false; crown.castShadow=false;
+      trees.add(trunk); trees.add(crown);
+    }
+    scene.add(trees);
 
-        if (mano === "right") {  
-          const d = distancia(pulgar, indice);  
-          const min = 0.02, max = 0.2;  
-          const normalizado = Math.min(Math.max((d - min) / (max - min), 0), 1);  
-          objetivoZoom = 5 - normalizado * 3;  
-        }  
-      });  
-    });  
+    // street lamps along the avenue
+    const lampGroup = new THREE.Group();
+    for(let z=-240; z<=240; z+=20){
+      const xLeft=-9, xRight=9;
+      [xLeft, xRight].forEach(x=>{
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.08,3), new THREE.MeshStandardMaterial({color:0x333333}));
+        pole.position.set(x,1.5,z);
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.25,8,8), new THREE.MeshStandardMaterial({emissive:0xffffcc, emissiveIntensity:0.0}));
+        head.position.set(x,2.6,z);
+        pole.castShadow=true; head.castShadow=false;
+        lampGroup.add(pole); lampGroup.add(head);
+      });
+    }
+    scene.add(lampGroup);
 
-    const camara = new Camera(video, {  
-      onFrame: async () => await manos.send({ image: video }),  
-      width: 640, height: 480  
-    });  
-    camara.start();  
+    // cars parked + moving
+    const cars = new THREE.Group();
+    function makeCar(x,z,color=0xff3333){
+      const body = new THREE.Mesh(new THREE.BoxGeometry(2.2,0.6,1.1), new THREE.MeshStandardMaterial({color}));
+      const top = new THREE.Mesh(new THREE.BoxGeometry(1.2,0.5,0.75), new THREE.MeshStandardMaterial({color:0x222222}));
+      body.position.set(0.0,0.3,0.0); top.position.set(0,0.8,0);
+      const g = new THREE.Group(); g.add(body); g.add(top);
+      g.position.set(x,0,z);
+      g.castShadow=true;
+      return g;
+    }
+    // parked
+    cars.add(makeCar(-3, -30, 0x0055ff));
+    cars.add(makeCar(3, 40, 0x333333));
+    // moving cars - we'll animate them
+    const moving1 = makeCar(-2, -180, 0xffaa00);
+    const moving2 = makeCar(2, 180, 0x00aa00);
+    cars.add(moving1); cars.add(moving2);
+    scene.add(cars);
 
-    iniciarEscena();  
-  </script>  
-</body>  
+    // simple skybox: color + subtle gradient via fog already used
+
+    // final touches: distant mountains (low poly boxes) for silhouette
+    for(let i=0;i<30;i++){
+      const m = new THREE.Mesh(new THREE.ConeGeometry(rand(20,60), rand(40,100), 4), new THREE.MeshStandardMaterial({color:0x5e6b7a}));
+      m.position.set(rand(-400,400), -10, -600 + rand(-100,100));
+      m.rotation.y = rand(0,Math.PI);
+      m.receiveShadow=false; m.castShadow=false;
+      scene.add(m);
+    }
+
+    // UI hide loader
+    loadingDiv.style.display = "none";
+
+    // store references for animation loop
+    scene.userData = { lampHeads: lampGroup.children.filter(c=>c.geometry.type==='SphereGeometry'), movingCars: [moving1, moving2] };
+
+    // start render
+    lastTime = performance.now();
+    animate(); // kick
+  }
+
+  // ---------- HAND TRACKING (MediaPipe) ----------
+  const videoEl = document.getElementById('vista');
+  const overlay = document.querySelector('.salida');
+  const octx = overlay.getContext('2d');
+  overlay.width = 320; overlay.height = 240;
+
+  const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+  hands.setOptions({ selfieMode:true, maxNumHands:2, modelComplexity:1, minDetectionConfidence:0.6, minTrackingConfidence:0.6 });
+  let leftPrev = null;
+
+  hands.onResults(results => {
+    octx.clearRect(0,0,overlay.width,overlay.height);
+    if (results.image) octx.drawImage(results.image,0,0,overlay.width,overlay.height);
+    if (!results.multiHandLandmarks) return;
+    results.multiHandLandmarks.forEach((landmarks, idx) => {
+      const handedness = results.multiHandedness[idx].label.toLowerCase();
+      // wrist is point 0
+      const wrist = landmarks[0];
+      const thumb = landmarks[4], index = landmarks[8];
+      if (handedness === 'left'){
+        if (leftPrev){
+          const dx = wrist.x - leftPrev.x;
+          const dy = wrist.y - leftPrev.y;
+          // map to camera orbit targets
+          const sensitivity = 6.0;
+          controls.target.x += dx * sensitivity;
+          controls.target.y -= dy * sensitivity;
+          // clamp target height
+          controls.target.y = Math.max(0.6, Math.min(8, controls.target.y));
+        }
+        leftPrev = { x:wrist.x, y:wrist.y };
+      } else {
+        // pinch zoom control
+        const d = Math.hypot(thumb.x-index.x, thumb.y-index.y);
+        const min=0.02, max=0.28;
+        const n = Math.min(Math.max((d-min)/(max-min),0),1);
+        // map to camera distance: 10..70
+        const dist = 70 - n * 60;
+        // ease camera position toward distance along current spherical coords
+        const dir = new THREE.Vector3();
+        camera.getWorldDirection(dir);
+        // set camera position along negative dir to keep lookAt
+        const look = controls.target.clone();
+        camera.position.copy( look.clone().add(dir.multiplyScalar(-dist)) );
+      }
+    });
+  });
+
+  const cam = new Camera(videoEl, { onFrame: async ()=> await hands.send({image: videoEl}), width:640, height:480 });
+  cam.start();
+
+  // ---------- ANIMATION ----------
+  let lastTime = 0;
+  let dayTime = 0; // 0..1 cycle (0 = noon, 0.5 = midnight)
+  function animate(t){
+    requestAnimationFrame(animate);
+    const dt = (t - lastTime) * 0.001 || 0;
+    lastTime = t;
+
+    // controls
+    controls.update();
+
+    // day/night cycle slow
+    dayTime += dt * 0.02; // very slow
+    if (dayTime>1) dayTime -= 1;
+    // compute light intensity based on dayTime (cosine)
+    const sunAngle = dayTime * Math.PI * 2;
+    const sunHeight = Math.max(Math.sin(sunAngle), -0.1);
+    directional.intensity = Math.max(0.15, sunHeight * 1.2);
+    hemi.intensity = Math.max(0.08, 0.5 * Math.max(sunHeight, 0.0));
+    // sky color transition
+    const dayColor = new THREE.Color(0x87ceeb);
+    const nightColor = new THREE.Color(0x071229);
+    scene.background = dayColor.clone().lerp(nightColor, 1 - Math.max(0, sunHeight));
+    scene.fog.color.copy(scene.background);
+
+    // night ambient
+    nightAmbient.intensity = Math.max(0, 0.8 * (1 - sunHeight));
+
+    // far lamp heads: emit when night
+    const lampHeads = scene.userData && scene.userData.lampHeads;
+    if (lampHeads){
+      const emissiveIntensity = Math.max(0, (1 - sunHeight) * 2.5);
+      lampHeads.forEach(h=>{
+        // material might be MeshStandardMaterial; set emissive/intensity safely
+        if (h.material){
+          h.material.emissive = new THREE.Color(0xffffb0);
+          h.material.emissiveIntensity = emissiveIntensity;
+        }
+      });
+    }
+
+    // moving cars along z axis
+    const moving = scene.userData && scene.userData.movingCars;
+    if (moving){
+      moving.forEach((car, idx)=>{
+        const speed = 12 + idx*4;
+        car.position.z += speed * dt * (idx%2===0?1:-1);
+        // loop
+        if (car.position.z > 260) car.position.z = -260;
+        if (car.position.z < -260) car.position.z = 260;
+        // small bob
+        car.position.y = 0.2 + Math.sin(t*0.002 + idx) * 0.02;
+      });
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  // ---------- RESIZE ----------
+  window.addEventListener('resize', ()=>{
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+  });
+
+  // ---------- NOTES ----------
+  // - Si quieres más polígonos, aumenta houseCountPerSide y trees.
+  // - Para mejorar la calidad de sombras, aumenta directional.shadow.mapSize (cuidado con perf).
+  // - Si quieres desactivar OrbitControls (solo manos), comenta su creación y .update() y centra camera.
+  </script>
+</body>
 </html>

@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Ciudad 3D - Boceto Completo (Noche / Neón)</title>
+<style>
+  html,body{height:100%;margin:0;background:#000;overflow:hidden;font-family:monospace}
+  #canvas3d{width:100%;height:100%;display:block}
+  video,canvas.salida{position:fixed;bottom:12px;right:12px;width:180px;height:140px;border-radius:8px;object-fit:cover;opacity:0.55;border:1px solid rgba(255,255,255,0.06);z-index:2}
+  .ui { position: fixed; left: 12px; top: 12px; color: #fff; background: rgba(0,0,0,0.5); padding: 8px 10px; border-radius:6px; font-size:13px; z-index:2; }
+  button { background:#0ff;padding:6px 8px;border:none;border-radius:4px;color:#000;cursor:pointer;font-weight:700 }
+</style>
+</head>
+<body>
+<canvas id="canvas3d"></canvas>
+<video id="vista" autoplay playsinline muted></video>
+<canvas class="salida"></canvas>
+<div class="ui">
+  <div>Gestos: <span id="gesto">Ninguno</span></div>
+  <div style="margin-top:6px">
+    <button id="toggleCam">Detener Cámara</button>
+    <button id="resetView">Reset View</button>
+  </div>
+</div>
+
+<!-- Librerías -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1620248655/camera_utils.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script>
+/* ============================
+   CONFIG Y VARIABLES GLOBALES
+   ============================ */
+const video = document.getElementById('vista');
+const canvasPreview = document.querySelector('.salida');
+const ctxPreview = canvasPreview.getContext('2d');
+const gestoLabel = document.getElementById('gesto');
+const btnToggleCam = document.getElementById('toggleCam');
+const btnResetView = document.getElementById('resetView');
+
+let scene, camera3d, renderer;
+let objetivoX=0, objetivoY=0, objetivoZoom=120;
+let suavX=0, suavY=0, suavZoom=120;
+let manoIzqPrev=null;
+let cameraStreamActive = true;
+
+/* ================
+   INICIALIZA THREE
+   ================ */
+function initThree() {
+  scene = new THREE.Scene();
+  // cielo noche/neon (si falla textura usa color)
+  const texLoader = new THREE.TextureLoader();
+  texLoader.load('x.webp',
+    tex => { tex.mapping = THREE.EquirectangularReflectionMapping; tex.colorSpace = THREE.SRGBColorSpace; scene.background = tex; },
+    undefined,
+    () => { scene.background = new THREE.Color(0x080812); } // fallback
+  );
+
+  // cámara
+  camera3d = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.5, 2000);
+  camera3d.position.set(0, 120, objetivoZoom);
+
+  // renderer
+  renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('canvas3d'), antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+  // NIEBLA
+  scene.fog = new THREE.FogExp2(0x05051a, 0.0014);
+
+  // LUCES: ambiente tenue + "sol" neón + luces de calle
+  scene.add(new THREE.AmbientLight(0x111133, 0.8));
+  const dir = new THREE.DirectionalLight(0x99ccff, 1.0);
+  dir.position.set(200, 400, 100);
+  dir.castShadow = true;
+  dir.shadow.mapSize.width = dir.shadow.mapSize.height = 2048;
+  scene.add(dir);
+
+  // LUCES NEÓN: pancartas y color
+  const neon1 = new THREE.PointLight(0xff66cc, 1.6, 500);
+  neon1.position.set(-200, 80, -100); scene.add(neon1);
+  const neon2 = new THREE.PointLight(0x66ccff, 1.4, 500);
+  neon2.position.set(200, 50, 100); scene.add(neon2);
+
+  // piso texturizado grande
+  texLoader.load('piso.webp',
+    t => { t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(80,80);
+           const mat = new THREE.MeshStandardMaterial({ map:t, roughness:1, metalness:0 });
+           const g = new THREE.PlaneGeometry(3000,3000); const piso = new THREE.Mesh(g,mat);
+           piso.rotation.x = -Math.PI/2; piso.receiveShadow=true; scene.add(piso);
+    },
+    undefined,
+    () => { const mat = new THREE.MeshStandardMaterial({ color:0x0b0b0e }); const g=new THREE.PlaneGeometry(3000,3000); const piso=new THREE.Mesh(g,mat); piso.rotation.x=-Math.PI/2; scene.add(piso); }
+  );
+
+  // Construir ciudad completa (edificios, calles, farolas, autos, nubes, aviones)
+  buildCity();
+
+  window.addEventListener('resize', onResize);
+  animate();
+}
+
+/* ================
+   CONSTRUCCIÓN
+   ================ */
+const cars = [], clouds = [], planes = [], windowsLights = [];
+
+function buildCity() {
+  const baseMats = [
+    new THREE.MeshStandardMaterial({ color:0x22334a, roughness:0.6, metalness:0.1 }),
+    new THREE.MeshStandardMaterial({ color:0x2a2238, roughness:0.7, metalness:0.05 }),
+    new THREE.MeshStandardMaterial({ color:0x33333a, roughness:0.5, metalness:0.2 })
+  ];
+
+  const neonMat1 = new THREE.MeshBasicMaterial({ color:0xff66cc, emissive:0xff66cc });
+  const neonMat2 = new THREE.MeshBasicMaterial({ color:0x66ccff, emissive:0x66ccff });
+
+  // grid de bloques
+  const SP = 30; // spacing
+  const R = 12;  // radio en bloques
+  for(let gx=-R; gx<=R; gx++){
+    for(let gz=-R; gz<=R; gz++){
+      // dejando espacio para calles: alternar
+      if(Math.abs(gx)%2===0 && Math.abs(gz)%2===0) {
+        // edificios densos por bloque (varios por bloque)
+        const count = 1 + Math.floor(Math.random()*3);
+        for(let b=0;b<count;b++){
+          const w = 6 + Math.random()*10;
+          const d = 6 + Math.random()*10;
+          const h = 20 + Math.random()*140;
+          const geo = new THREE.BoxGeometry(w,h,d);
+          const mat = baseMats[Math.floor(Math.random()*baseMats.length)];
+          const m = new THREE.Mesh(geo, mat);
+          const jitterX = (Math.random()-0.5)*12;
+          const jitterZ = (Math.random()-0.5)*12;
+          m.position.set(gx*SP + jitterX, h/2 - 1, gz*SP + jitterZ);
+          m.castShadow=true; m.receiveShadow=true;
+          scene.add(m);
+
+          // ventanas emisivas aleatorias (simulación)
+          addWindowsToBuilding(m, w, h, d);
+        }
+      } else {
+        // Esquina: colocar farolas o pequeños parques
+        if(Math.random() < 0.18) {
+          const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.3,8,8), new THREE.MeshStandardMaterial({color:0x222228}));
+          pole.position.set(gx*SP, 3, gz*SP); scene.add(pole);
+          const glow = new THREE.PointLight(0xffcc66, 0.6, 30); glow.position.set(gx*SP,6,gz*SP); scene.add(glow);
+        }
+      }
+    }
+  }
+
+  // calles principales (bandas negras sobre el piso)
+  const streetMat = new THREE.MeshStandardMaterial({ color:0x06060a, roughness:0.9 });
+  for(let i=-R;i<=R;i++){
+    // verticales
+    let g1 = new THREE.PlaneGeometry(12, (R*2+3)*SP);
+    let m1 = new THREE.Mesh(g1, streetMat); m1.rotation.x = -Math.PI/2; m1.position.set(i*SP, -0.99, 0);
+    scene.add(m1);
+    // horizontales
+    let g2 = new THREE.PlaneGeometry((R*2+3)*SP, 12);
+    let m2 = new THREE.Mesh(g2, streetMat); m2.rotation.x = -Math.PI/2; m2.position.set(0, -0.99, i*SP);
+    scene.add(m2);
+  }
+
+  // autos: simple geometría, mover por calles
+  for(let i=0;i<40;i++){
+    const color = 0xff4444 + Math.floor(Math.random()*0xffffff)%0xffffff;
+    const car = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(3.5,1.1,6), new THREE.MeshStandardMaterial({color}));
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(3,0.9,3), new THREE.MeshStandardMaterial({color:0x111111, roughness:0.2}));
+    body.position.y = 0.6; cabin.position.set(0,1.05,0.2);
+    car.add(body); car.add(cabin);
+    car.position.set((Math.floor(Math.random()*24)-12)*SP, 0.6, -150 + Math.random()*300);
+    car.userData = { dir:'z', speed: 0.6 + Math.random()*1.2 };
+    car.castShadow = true;
+    scene.add(car); cars.push(car);
+  }
+
+  // nubes volumétricas (grupos esféricos) en altura
+  for(let i=0;i<35;i++){
+    const cg = new THREE.Group();
+    const n = 3 + Math.floor(Math.random()*4);
+    for(let k=0;k<n;k++){
+      const s = new THREE.Mesh(new THREE.SphereGeometry(6 + Math.random()*12,8,8), new THREE.MeshLambertMaterial({color:0x8888aa, transparent:true, opacity:0.22}));
+      s.position.set((Math.random()-0.5)*300, (Math.random()*60)+80, (Math.random()-0.5)*300);
+      cg.add(s);
+    }
+    scene.add(cg); clouds.push({mesh:cg, speed:0.02 + Math.random()*0.05});
+  }
+
+  // aviones simples
+  for(let i=0;i<6;i++){
+    const pg = new THREE.Group();
+    const fus = new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.5,8,8), new THREE.MeshLambertMaterial({color:0xcccccc}));
+    fus.rotation.z = Math.PI/2;
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(14,0.2,3), new THREE.MeshLambertMaterial({color:0xaaaaaa}));
+    pg.add(fus); pg.add(wing);
+    pg.position.set((Math.random()-0.5)*400, 120 + Math.random()*80, (Math.random()-0.5)*400);
+    scene.add(pg);
+    planes.push({mesh:pg, angle: Math.random()*Math.PI*2, speed:0.6 + Math.random()*1.2, radius: 80 + Math.random()*160, centerX: pg.position.x, centerZ: pg.position.z});
+  }
+
+  // añadir letreros neón en algunos edificios
+  for(let i=0;i<50;i++){
+    if(Math.random()<0.3) {
+      const s = new THREE.Mesh(new THREE.PlaneGeometry(10,4), Math.random()>0.5?neonMat1:neonMat2);
+      const bx = (Math.floor(Math.random()*24)-12)*SP; const bz = (Math.floor(Math.random()*24)-12)*SP;
+      s.position.set(bx + (Math.random()-0.5)*8, 30 + Math.random()*80, bz + (Math.random()-0.5)*8);
+      s.lookAt(camera3d.position); scene.add(s);
+    }
+  }
+}
+
+// Crear ventanas ilum. simples para un building mesh
+function addWindowsToBuilding(building, w,h,d) {
+  const rows = Math.floor(h/4);
+  const cols = Math.max(1, Math.floor(w/2));
+  for(let r=0;r<rows;r+=1) {
+    for(let c=0;c<cols;c++) {
+      if(Math.random() < 0.55) {
+        const win = new THREE.Mesh(new THREE.PlaneGeometry(0.9,1.4), new THREE.MeshBasicMaterial({color: 0xffeeaa}));
+        // pick a face random (front/back/left/right)
+        const face = Math.floor(Math.random()*4);
+        let pos = new THREE.Vector3();
+        if(face===0){ pos.set(building.position.x - w/2 + 1 + c*2, 4 + r*4, building.position.z + d/2 + 0.51); win.rotation.y=0; }
+        else if(face===1){ pos.set(building.position.x - w/2 + 1 + c*2, 4 + r*4, building.position.z - d/2 - 0.51); win.rotation.y=Math.PI; }
+        else if(face===2){ pos.set(building.position.x + w/2 + 0.51, 4 + r*4, building.position.z - d/2 + 1 + c*2); win.rotation.y=Math.PI/2; }
+        else { pos.set(building.position.x - w/2 - 0.51, 4 + r*4, building.position.z - d/2 + 1 + c*2); win.rotation.y=-Math.PI/2; }
+        win.position.copy(pos);
+        scene.add(win); windowsLights.push(win);
+      }
+    }
+  }
+}
+
+/* ========================
+   ANIMACIÓN PRINCIPAL
+   ======================== */
+function animate() {
+  requestAnimationFrame(animate);
+
+  // animaciones: autos, nubes, aviones, ventanas parpadeando, luces neón pulsando
+  const t = performance.now()*0.001;
+
+  // autos: mueven en z y wrap
+  cars.forEach(car => {
+    car.position.z += car.userData.speed * 0.6;
+    if(car.position.z > 160) car.position.z = -160;
+  });
+
+  // nubes: translación suave
+  clouds.forEach(c => {
+    c.mesh.position.x += Math.cos(t*0.1) * c.speed;
+    c.mesh.position.z += Math.sin(t*0.1) * c.speed * 0.8;
+  });
+
+  // aviones: circular
+  planes.forEach(p => {
+    p.angle += p.speed * 0.01;
+    p.mesh.position.x = p.centerX + Math.cos(p.angle) * p.radius;
+    p.mesh.position.z = p.centerZ + Math.sin(p.angle) * p.radius;
+    p.mesh.rotation.y = -p.angle;
+  });
+
+  // ventanas: parpadeo aleatorio
+  windowsLights.forEach((w,i) => {
+    const flick = Math.sin(t*5 + i) * 0.5 + Math.random()*0.3;
+    w.material.opacity = Math.max(0.05, Math.min(1, 0.6 + flick));
+    w.material.transparent = true;
+  });
+
+  // cámara suavizada desde gestos
+  suavX += (objetivoX - suavX) * 0.08;
+  suavY += (objetivoY - suavY) * 0.08;
+  suavZoom += (objetivoZoom - suavZoom) * 0.06;
+
+  const rx = suavX, ry = suavY;
+  const R = suavZoom;
+  const cx = Math.sin(ry) * Math.cos(rx) * R;
+  const cz = Math.cos(ry) * Math.cos(rx) * R;
+  const cy = 70 + Math.sin(rx) * 20;
+
+  camera3d.position.set(cx, cy, cz);
+  camera3d.lookAt(0, 0, 0);
+  renderer.render(scene, camera3d);
+}
+
+/* ================
+   UTILS & RESIZE
+   ================ */
+function onResize() {
+  camera3d.aspect = innerWidth / innerHeight;
+  camera3d.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+}
+
+/* ============================
+   MEDIA PIPE (Hands) + Camera
+   ============================ */
+// Definición fallback de Camera si no está exportada
+const Camera = window.Camera || class {
+  constructor(videoEl, config) {
+    this.videoEl = videoEl;
+    this.onFrame = config.onFrame;
+    this.width = config.width || 640;
+    this.height = config.height || 480;
+    this._stopped = false;
+  }
+  async start(){
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ video: { width:this.width, height:this.height } });
+      this.videoEl.srcObject = s;
+      this.videoEl.width = this.width; this.videoEl.height = this.height;
+      await this.videoEl.play();
+      this._stopped = false;
+      const loop = async () => {
+        if(this._stopped) return;
+        await this.onFrame();
+        requestAnimationFrame(loop);
+      };
+      loop();
+    } catch(e) {
+      console.error("No se pudo iniciar la cámara:", e);
+    }
+  }
+  stop(){
+    this._stopped = true;
+    const s = this.videoEl.srcObject;
+    if(s && s.getTracks) s.getTracks().forEach(t=>t.stop());
+    this.videoEl.srcObject = null;
+  }
+};
+
+const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}` });
+hands.setOptions({ maxNumHands:2, modelComplexity:1, selfieMode:true, minDetectionConfidence:0.45, minTrackingConfidence:0.45 });
+
+hands.onResults(results => {
+  // dibujar preview
+  ctxPreview.clearRect(0,0,canvasPreview.width,canvasPreview.height);
+  if(results.image) ctxPreview.drawImage(results.image, 0,0, canvasPreview.width, canvasPreview.height);
+
+  if(!results.multiHandLandmarks || results.multiHandLandmarks.length===0) { gestoLabel.textContent='Ninguno'; manoIzqPrev=null; return; }
+
+  // manejar gestos por mano
+  results.multiHandLandmarks.forEach((landmarks, idx) => {
+    const handedness = results.multiHandedness && results.multiHandedness[idx] && results.multiHandedness[idx].label ? results.multiHandedness[idx].label.toLowerCase() : 'right';
+    const wrist = landmarks[0];
+    const thumb = landmarks[4];
+    const index = landmarks[8];
+
+    // mano izquierda: rotar (movimiento de muñeca)
+    if(handedness === 'left') {
+      if(manoIzqPrev) {
+        const dx = wrist.x - manoIzqPrev.x;
+        const dy = wrist.y - manoIzqPrev.y;
+        // invertir/ajustar sensibilidad
+        objetivoY -= dx * 4.5;
+        objetivoX -= dy * 3.6;
+        objetivoX = Math.max(-Math.PI/2, Math.min(Math.PI/2, objetivoX));
+        gestoLabel.textContent = 'Rotando';
+      }
+      manoIzqPrev = { x: wrist.x, y: wrist.y };
+    }
+
+    // mano derecha: pinch zoom
+    if(handedness === 'right') {
+      const d = Math.hypot(thumb.x - index.x, thumb.y - index.y);
+      const min = 0.02, max = 0.25;
+      const norm = Math.min(Math.max((d - min)/(max-min), 0), 1);
+      objetivoZoom = 40 + (1 - norm) * 260; // amplia gama: cercano -> 40, lejos -> 300
+      gestoLabel.textContent = 'Zoom';
+    }
+
+  });
+});
+
+// iniciar camera (fallback si la importada no está presente)
+const cam = new Camera(video, {
+  onFrame: async () => { await hands.send({ image: video }); },
+  width: 960, height: 720
+});
+cam.start();
+btnToggleCam.addEventListener('click', () => {
+  if(cameraStreamActive){ cam.stop(); cameraStreamActive=false; btnToggleCam.textContent='Iniciar Cámara'; }
+  else { cam.start(); cameraStreamActive=true; btnToggleCam.textContent='Detener Cámara'; }
+});
+btnResetView.addEventListener('click', () => { objetivoX=0; objetivoY=0; objetivoZoom=120; });
+
+/* ====================
+   INICIO ESCENA
+   ==================== */
+initThree();
+
+/* ================
+   Ajustes de canvas preview
+   ================ */
+function resizePreview(){
+  canvasPreview.width = 320; canvasPreview.height = 240;
+}
+resizePreview();
+
+/* ====================
+   Mensaje consola útil
+   ==================== */
+console.log('Ciudad (Boceto 1) cargada — noche/neón con gestos activos.');
+</script>
+</body>
+</html>
